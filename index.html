@@ -1,0 +1,950 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VEX U particle filter simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #eef1f4; --ink: #1c2430; --muted: #5b6675; --rule: #d3d8de; --control: #ffffff; --control-ink: #1c2430;
+  --accent: #1f3a5f; --accent-ink: #ffffff;
+  --tile: #d5d9dd; --tile-line: #bfc5cb; --perimeter: #7d8790;
+  --truth: #1f3a5f; --odom: #b7791f; --est: #0f7f81; --particle: #6d4ac4; --ray: #cf4f39; --object: #8a94a0; --object-edge: #5f6873;
+  color-scheme: light;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #14181d; --ink: #e6eaf0; --muted: #98a2ae; --rule: #2c333b; --control: #1d232a; --control-ink: #e6eaf0;
+    --accent: #8db4e8; --accent-ink: #0f1620;
+    --tile: #252b32; --tile-line: #313942; --perimeter: #5c6670;
+    --truth: #8db4e8; --odom: #e0a84a; --est: #3cc4c2; --particle: #a98bf0; --ray: #f07a62; --object: #6f7a86; --object-edge: #9aa5b1;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #14181d; --ink: #e6eaf0; --muted: #98a2ae; --rule: #2c333b; --control: #1d232a; --control-ink: #e6eaf0;
+  --accent: #8db4e8; --accent-ink: #0f1620;
+  --tile: #252b32; --tile-line: #313942; --perimeter: #5c6670;
+  --truth: #8db4e8; --odom: #e0a84a; --est: #3cc4c2; --particle: #a98bf0; --ray: #f07a62; --object: #6f7a86; --object-edge: #9aa5b1;
+  color-scheme: dark;
+}
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px; line-height: 1.45;
+}
+.app { display: grid; grid-template-columns: minmax(0, calc(100vh - 150px)) 360px; grid-template-areas: "stage head" "stage panel";
+  grid-template-rows: auto 1fr; gap: 0 32px; padding: 24px; justify-content: center; align-items: start; }
+.head { grid-area: head; display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px; }
+.stage { grid-area: stage; }
+.panel { grid-area: panel; }
+.stage { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+#field { width: 100%; aspect-ratio: 1 / 1; display: block; cursor: crosshair; touch-action: manipulation; border-radius: 6px; }
+#graph { width: 91.2%; margin: 0 4.4%; height: 96px; display: block; }
+.graph-caption { font-size: 13px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap; margin: 0 4.4%; }
+.panel { display: flex; flex-direction: column; gap: 22px; }
+h1 { font-size: 22px; font-weight: 600; line-height: 1.2; margin: 0 0 4px; letter-spacing: -0.01em; }
+.lede { margin: 0; color: var(--muted); font-size: 14px; }
+.readouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 14px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.readout b { display: block; font-size: 26px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.readout b small { font-size: 14px; font-weight: 400; margin-left: 3px; }
+.readout > span { font-size: 12.5px; color: var(--muted); }
+.readout.est b { color: var(--est); } .readout.odom b { color: var(--odom); }
+.status { font-size: 13px; color: var(--muted); min-height: 2.8em; margin: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+section h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+section p.hint { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select {
+  font: inherit; font-size: 14px; color: var(--control-ink); background: var(--control);
+  border: 1px solid var(--rule); border-radius: 5px; padding: 6px 12px; cursor: pointer;
+}
+button:hover, select:hover { border-color: var(--muted); }
+button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:focus-visible, select:focus-visible, input:focus-visible, #field:focus-visible { outline: 2px solid var(--est); outline-offset: 2px; }
+label.check { display: flex; gap: 8px; align-items: center; font-size: 14px; cursor: pointer; }
+.slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 14px; margin-top: 8px; }
+.slider output { font-variant-numeric: tabular-nums; color: var(--muted); }
+.slider input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.pad { display: none; grid-template-columns: repeat(3, 52px); gap: 6px; margin-top: 10px; user-select: none; -webkit-user-select: none; }
+.pad button { height: 46px; padding: 0; font-size: 18px; touch-action: none; }
+.pad .sp { visibility: hidden; }
+kbd { font-family: inherit; font-size: 12.5px; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--control); }
+@media (hover: none), (max-width: 860px) { .pad { display: grid; } }
+@media (max-width: 860px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "stage" "panel"; padding: 14px; gap: 0; }
+  .head { margin-bottom: 14px; gap: 10px; }
+  .stage { margin-bottom: 22px; }
+  h1 { font-size: 19px; }
+  .lede { display: none; }
+  .readouts { padding: 10px 0; }
+  .readout b { font-size: 22px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage">
+    <canvas id="field" tabindex="0" aria-label="Simulated VEX field. Click to add or remove a game object."></canvas>
+    <canvas id="graph" aria-label="Position error over the last 20 seconds"></canvas>
+    <div class="graph-caption"><span>Position error, last 20 seconds</span><span id="graphScale"></span></div>
+  </div>
+
+  <div class="head">
+    <header>
+      <h1>Particle filter simulator</h1>
+      <p class="lede">Your <code>mcl.hpp</code> and <code>odometry.hpp</code>, ported to JavaScript and checked against the C++, driving a virtual robot on a VEX field.</p>
+    </header>
+
+    <div class="readouts" aria-live="polite">
+      <div class="readout est"><b><span id="errMcl">0.0</span><small>in</small></b><span>Filter error</span></div>
+      <div class="readout odom"><b><span id="errOdom">0.0</span><small>in</small></b><span>Odometry error</span></div>
+      <div class="readout"><b id="neff">250</b><span>Particles in use</span></div>
+    </div>
+    <div class="status" id="status"></div>
+
+    <div class="legend">
+      <span><i style="background:var(--truth)"></i>True robot</span>
+      <span><i style="background:var(--est)"></i>Filter estimate</span>
+      <span><i style="background:var(--odom)"></i>Odometry only</span>
+      <span><i style="background:var(--particle);height:6px;width:6px;border-radius:50%"></i>Particles</span>
+      <span><i style="background:var(--ray)"></i>Sensor beams</span>
+    </div>
+  </div>
+
+  <div class="panel">
+
+    <section>
+      <h2>Drive</h2>
+      <p class="hint"><kbd>W</kbd> <kbd>S</kbd> drive, <kbd>A</kbd> <kbd>D</kbd> turn. Arrow keys work too.</p>
+      <div class="row">
+        <button id="auto" aria-pressed="false">Drive a square by itself</button>
+        <select id="steer" aria-label="What the autopilot steers by">
+          <option value="filter">Steer by filter estimate</option>
+          <option value="odom">Steer by odometry only</option>
+        </select>
+      </div>
+      <div class="pad" aria-label="Drive pad">
+        <span class="sp"></span><button data-key="w" aria-label="Forward">▲</button><span class="sp"></span>
+        <button data-key="a" aria-label="Turn left">◀</button><button data-key="s" aria-label="Backward">▼</button><button data-key="d" aria-label="Turn right">▶</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Disturb it</h2>
+      <p class="hint">Click the field to add or remove a game object. Objects block sensor beams, and the filter doesn't know where they are.</p>
+      <div class="row">
+        <button id="slip">Slip 8 inches</button>
+        <button id="scatter">Scatter objects</button>
+        <button id="clearObj">Clear objects</button>
+      </div>
+      <p class="hint" style="margin-top:8px">A slip moves the robot without the wheels noticing, like a bounce in a collision.</p>
+      <div class="slider"><label for="junk">Junk sensor readings</label><output id="junkOut"></output><input id="junk" type="range" min="0" max="30" step="1" value="5"></div>
+    </section>
+
+    <section>
+      <h2>Robot hardware</h2>
+      <div class="slider"><label for="scale">Tracking wheel size error</label><output id="scaleOut"></output><input id="scale" type="range" min="0" max="8" step="0.5" value="3"></div>
+      <div class="slider"><label for="drift">IMU drift</label><output id="driftOut"></output><input id="drift" type="range" min="0" max="10" step="0.5" value="0"></div>
+      <div class="row" style="margin-top:12px" id="sensorToggles"></div>
+    </section>
+
+    <section>
+      <h2>Filter</h2>
+      <div class="row" style="flex-direction:column;align-items:flex-start;gap:6px">
+        <label class="check"><input type="checkbox" id="correction" checked> Use distance sensors (off is like holding B)</label>
+        <label class="check"><input type="checkbox" id="showParticles" checked> Show particles</label>
+        <label class="check"><input type="checkbox" id="showRays" checked> Show sensor beams</label>
+      </div>
+      <div class="slider"><label for="nparts">Particles</label><output id="npartsOut"></output><input id="nparts" type="range" min="50" max="1000" step="50" value="250"></div>
+      <div class="slider"><label for="sigma">Sensor noise the filter assumes</label><output id="sigmaOut"></output><input id="sigma" type="range" min="1" max="15" step="1" value="5"></div>
+      <div class="row" style="margin-top:12px"><button id="setPose">Tell it the true position (button A)</button></div>
+    </section>
+
+    <section>
+      <h2>Time</h2>
+      <div class="row">
+        <button id="play" aria-pressed="true">Pause</button>
+        <select id="speed" aria-label="Simulation speed">
+          <option value="0.25">¼ speed</option><option value="1" selected>Real time</option><option value="4">4× speed</option>
+        </select>
+        <button id="stepBtn" disabled>Step 10 ms</button>
+        <button id="reset">Reset</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>// mcl_port.js — line-for-line JavaScript port of mcl.hpp + odometry.hpp.
+// Includes an exact replica of GCC's std::mt19937 and the libstdc++
+// distributions the C++ uses, so with the same seed and inputs this produces
+// the SAME numbers as the C++ (verified by test/parity_check.js).
+// If you change mcl.hpp or odometry.hpp, change this file to match and rerun the parity check.
+"use strict";
+const loc = (() => {
+  const kPi = 3.14159265358979323846;
+
+  // ---------- std::mt19937 (exact) ----------
+  class MT19937 {
+    constructor(seed) {
+      this.mt = new Uint32Array(624); this.idx = 624;
+      this.mt[0] = seed >>> 0;
+      for (let i = 1; i < 624; i++) {
+        const p = this.mt[i - 1] ^ (this.mt[i - 1] >>> 30);
+        // 1812433253 * p + i, mod 2^32, without losing precision
+        this.mt[i] = (((((p & 0xffff0000) >>> 16) * 1812433253) << 16) + (p & 0x0000ffff) * 1812433253 + i) >>> 0;
+      }
+    }
+    next() {
+      const mt = this.mt;
+      if (this.idx >= 624) {
+        for (let k = 0; k < 624; k++) {
+          const y = (mt[k] & 0x80000000) | (mt[(k + 1) % 624] & 0x7fffffff);
+          mt[k] = (mt[(k + 397) % 624] ^ (y >>> 1) ^ ((y & 1) ? 0x9908b0df : 0)) >>> 0;
+        }
+        this.idx = 0;
+      }
+      let y = mt[this.idx++];
+      y ^= y >>> 11;
+      y = (y ^ ((y << 7) & 0x9d2c5680)) >>> 0;
+      y = (y ^ ((y << 15) & 0xefc60000)) >>> 0;
+      y ^= y >>> 18;
+      return y >>> 0;
+    }
+  }
+  // std::generate_canonical<double, 53>(mt19937): two 32-bit draws.
+  function canonical(rng) {
+    let sum = 0, tmp = 1;
+    for (let k = 0; k < 2; k++) { sum += rng.next() * tmp; tmp *= 4294967296; }
+    let ret = sum / tmp;
+    if (ret >= 1) ret = 1 - Number.EPSILON / 2;  // nextafter(1, 0)
+    return ret;
+  }
+  // std::normal_distribution<double> (Marsaglia polar, caches 2nd value).
+  // Each C++ distribution OBJECT has its own cache, so create one per C++ scope.
+  class Normal {
+    constructor(mean, sd) { this.mean = mean; this.sd = sd; this.saved = 0; this.has = false; }
+    sample(rng) {
+      let ret;
+      if (this.has) { this.has = false; ret = this.saved; }
+      else {
+        let x, y, r2;
+        do { x = 2.0 * canonical(rng) - 1.0; y = 2.0 * canonical(rng) - 1.0; r2 = x * x + y * y; }
+        while (r2 > 1.0 || r2 === 0.0);
+        const mult = Math.sqrt(-2 * Math.log(r2) / r2);
+        this.saved = x * mult; this.has = true; ret = y * mult;
+      }
+      return ret * this.sd + this.mean;
+    }
+  }
+  // std::uniform_real_distribution<double>(a, b)
+  const uniformReal = (rng, a, b) => canonical(rng) * (b - a) + a;
+  // std::uniform_int_distribution<int>(0, hi) with mt19937: Lemire's method (GCC 13).
+  function uniformInt(rng, hi) {
+    const range = BigInt(hi) + 1n, M = 1n << 32n;
+    let product = BigInt(rng.next()) * range, low = product % M;
+    if (low < range) {
+      const threshold = (M - range) % range;
+      while (low < threshold) { product = BigInt(rng.next()) * range; low = product % M; }
+    }
+    return Number(product >> 32n);
+  }
+
+  // ---------- odometry.hpp ----------
+  function odomStep(c, dVert, dHorz, thetaPrev, thetaNow) {
+    const dTheta = thetaNow - thetaPrev;
+    let fwd, left;
+    if (Math.abs(dTheta) < 1e-6) { fwd = dVert; left = dHorz; }
+    else {
+      const chord = 2.0 * Math.sin(dTheta / 2.0);
+      fwd = chord * (dVert / dTheta + c.vertLeftOffset);
+      left = chord * (dHorz / dTheta - c.horzFwdOffset);
+    }
+    const m = thetaPrev + dTheta / 2.0;
+    const cm = Math.cos(m), sm = Math.sin(m);
+    return { dx: fwd * cm - left * sm, dy: fwd * sm + left * cm };
+  }
+
+  // ---------- mcl.hpp ----------
+  const defaultMCLConfig = () => ({
+    numParticles: 250, fieldHalf: 70.2, maxRange: 78.0,
+    transNoiseFrac: 0.05, transNoiseMin: 0.02,
+    sensorSigmaFrac: 0.05, sensorSigmaMin: 0.6, outlierProb: 0.10,
+    resampleJitter: 0.1, resampleRatio: 0.5,
+    recoveryResidual: 3.0, recoveryMaxResidual: 12.0, recoveryCount: 4, recoveryCountShort: 6, recoveryFrac: 0.5, recoverySpread: 8.0,
+  });
+  // NOTE: Math.sin/cos/exp/log can differ from C++'s math library in the LAST binary digit
+  // (~1e-16 relative). The C++ itself also differs between your laptop (glibc) and the
+  // V5 (newlib). So results match the C++ to rounding error, not bit-for-bit.
+  const hypot = Math.hypot;
+
+  class MCL {
+    constructor(cfg, sensors, seed = 12345) {
+      this.cfg = { ...cfg }; this.sensors = sensors.map(s => ({ ...s }));
+      this.longCnt = new Array(this.sensors.length).fill(0);
+      this.shortCnt = new Array(this.sensors.length).fill(0);
+      this.particles = []; this.geo = []; this.rng = new MT19937(seed);
+      this.estX = 0; this.estY = 0;
+      this.lastRecover = false;  // (sim-only instrumentation, not in C++)
+      this.lastResampled = false;
+    }
+    init(x, y, spread) {
+      const n = new Normal(0.0, spread), N = this.cfg.numParticles, w = 1.0 / N;
+      this.particles = [];
+      for (let i = 0; i < N; i++) {
+        const px = this.clamp(x + n.sample(this.rng)); const py = this.clamp(y + n.sample(this.rng));
+        this.particles.push({ x: px, y: py, w, scored: true });
+      }
+      this.computeEstimate();
+      this.longCnt.fill(0); this.shortCnt.fill(0);
+    }
+    predict(dx, dy) {
+      const dist = hypot(dx, dy);
+      if (dist < 1e-4) return;
+      const n = new Normal(0.0, this.cfg.transNoiseFrac * dist + this.cfg.transNoiseMin);
+      for (const p of this.particles) {
+        p.x = this.clamp(p.x + dx + n.sample(this.rng));
+        p.y = this.clamp(p.y + dy + n.sample(this.rng));
+      }
+      this.computeEstimate();
+    }
+    update(readings, theta) {
+      this.lastRecover = false; this.lastResampled = false;
+      if (this.particles.length === 0) return false;
+      this.geo = [];
+      const ct = Math.cos(theta), st = Math.sin(theta);
+      for (let i = 0; i < this.sensors.length && i < readings.length; i++) {
+        if (!readings[i].valid) continue;
+        const sc = this.sensors[i], a = theta + sc.angle;
+        this.geo.push({ ox: sc.fwd * ct - sc.left * st, oy: sc.fwd * st + sc.left * ct,
+                        c: Math.cos(a), s: Math.sin(a), meas: readings[i].dist, idx: i });
+      }
+      if (this.geo.length === 0) return false;
+
+      let recover = false;
+      for (const g of this.geo) {
+        const expected = this.raycast(this.estX + g.ox, this.estY + g.oy, g.c, g.s);
+        const tol = Math.max(this.cfg.recoveryResidual, 3.0 * this.sigmaFor(expected));
+        const residual = Math.abs(g.meas - expected);
+        const plausible = expected <= this.cfg.maxRange && residual <= this.cfg.recoveryMaxResidual;
+        if (residual <= tol) {
+          this.longCnt[g.idx] = 0;
+          this.shortCnt[g.idx] = 0;
+        } else if (plausible) {
+          if (g.meas > expected) this.longCnt[g.idx]++;
+          else                   this.shortCnt[g.idx]++;
+        }
+        if (this.longCnt[g.idx] >= this.cfg.recoveryCount || this.shortCnt[g.idx] >= this.cfg.recoveryCountShort) {
+          recover = true;
+          this.longCnt[g.idx] = 0;
+          this.shortCnt[g.idx] = 0;
+        }
+      }
+
+      let sum = 0.0;
+      for (const p of this.particles) {
+        let like = 1.0;
+        for (const g of this.geo) like *= this.likelihood(g.meas, this.raycast(p.x + g.ox, p.y + g.oy, g.c, g.s));
+        p.w *= like; p.scored = true; sum += p.w;
+      }
+      if (!(sum > 1e-300) || !Number.isFinite(sum)) {
+        const w = 1.0 / this.particles.length;
+        for (const p of this.particles) p.w = w;
+      } else {
+        for (const p of this.particles) p.w /= sum;
+      }
+      let sumSq = 0.0;
+      for (const p of this.particles) sumSq += p.w * p.w;
+      this.nEff = 1.0 / sumSq;  // (sim-only instrumentation)
+      const nInject = recover ? Math.trunc(this.cfg.recoveryFrac * this.particles.length) : 0;
+      if (nInject > 0 || 1.0 / sumSq < this.cfg.resampleRatio * this.particles.length) {
+        this.computeEstimate();
+        const cx = this.estX, cy = this.estY;
+        this.resample();
+        this.lastResampled = true;
+        const n = new Normal(0.0, this.cfg.recoverySpread);
+        for (let k = 0; k < nInject; k++) {
+          const p = this.particles[uniformInt(this.rng, this.particles.length - 1)];
+          p.x = this.clamp(cx + n.sample(this.rng));
+          p.y = this.clamp(cy + n.sample(this.rng));
+          p.scored = false;
+        }
+      }
+      this.lastRecover = recover;
+      this.computeEstimate();
+      return true;
+    }
+    estimate(theta) { return { x: this.estX, y: this.estY, theta }; }
+    raycast(ox, oy, c, s) {
+      const W = this.cfg.fieldHalf;
+      let t = 1e9;
+      if (c > 1e-9) t = Math.min(t, (W - ox) / c);
+      else if (c < -1e-9) t = Math.min(t, (-W - ox) / c);
+      if (s > 1e-9) t = Math.min(t, (W - oy) / s);
+      else if (s < -1e-9) t = Math.min(t, (-W - oy) / s);
+      return Math.max(0.0, t);
+    }
+    sigmaFor(expected) { return Math.max(this.cfg.sensorSigmaMin, this.cfg.sensorSigmaFrac * expected); }
+    likelihood(measured, expected) {
+      const sigma = this.sigmaFor(expected);
+      const z = (measured - expected) / sigma;
+      const gauss = Math.exp(-0.5 * z * z) / (sigma * Math.sqrt(2.0 * kPi));
+      return (1.0 - this.cfg.outlierProb) * gauss + this.cfg.outlierProb / this.cfg.maxRange;
+    }
+    resample() {
+      const N = this.particles.length, out = [];
+      const jitter = new Normal(0.0, this.cfg.resampleJitter);
+      const r = uniformReal(this.rng, 0.0, 1.0 / N);
+      let cum = this.particles[0].w, i = 0;
+      for (let m = 0; m < N; m++) {
+        const U = r + m / N;
+        while (U > cum && i < N - 1) cum += this.particles[++i].w;
+        const p = { ...this.particles[i] };
+        p.x = this.clamp(p.x + jitter.sample(this.rng));
+        p.y = this.clamp(p.y + jitter.sample(this.rng));
+        p.w = 1.0 / N;
+        out.push(p);
+      }
+      this.particles = out;
+    }
+    computeEstimate() {
+      let x = 0, y = 0, wsum = 0;
+      for (const p of this.particles) {
+        if (!p.scored) continue;
+        x += p.w * p.x; y += p.w * p.y; wsum += p.w;
+      }
+      if (wsum > 0) { this.estX = x / wsum; this.estY = y / wsum; }
+    }
+    clamp(v) { return Math.min(Math.max(v, -this.cfg.fieldHalf), this.cfg.fieldHalf); }
+  }
+  return { kPi, MT19937, Normal, canonical, uniformInt, odomStep, defaultMCLConfig, MCL };
+})();
+if (typeof module !== "undefined") module.exports = loc;
+</script>
+<script>// sim_core.js — the simulated world plus a port of localizer.cpp's logic.
+// No drawing code here, so it can run headless in Node for testing.
+"use strict";
+const simCore = ((loc) => {
+  const { kPi } = loc;
+  const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  const clampV = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+
+  // ---------- Fake hardware ----------
+  // Each class mimics the PROS device the robot code reads, including units and error values.
+  class FakeImu {          // pros::Imu::get_rotation(): degrees, CLOCKWISE positive, unbounded
+    constructor() { this.cwDeg = 0; }
+    get_rotation() { return this.cwDeg; }
+  }
+  class FakeRotation {     // pros::Rotation::get_position(): centidegrees (integer)
+    constructor() { this.centideg = 0; }
+    get_position() { return Math.round(this.centideg); }
+  }
+  class FakeDistance {     // pros::Distance::get(): millimeters (integer), 9999 = nothing in range
+    constructor() { this.mm = 9999; }
+    get() { return this.mm; }
+  }
+
+  // trackingWheel() from robot_config.cpp
+  function trackingWheel(sensor, diameterIn) {
+    let last = 0.0;
+    return () => { const cd = sensor.get_position(); last = cd / 36000.0 * kPi * diameterIn; return last; };
+  }
+
+  // ---------- Port of localizer.cpp ----------
+  class Localizer {
+    constructor(cfg, imu, vertInches, horzInches, sensors) {
+      this.cfg = cfg; this.imu = imu; this.vert = vertInches; this.horz = horzInches;
+      this.sensors = sensors;
+      this.mcl = new loc.MCL(cfg.mcl, sensors.map(b => b.mount), cfg.seed ?? 12345);
+      this.odomPose = { x: 0, y: 0, theta: 0 };
+      this.headingOffset = 0; this.lastImuRad = 0;
+      this.lastTheta = 0; this.lastVert = 0; this.lastHorz = 0;
+      this.sensorCorrection = true; this.tick = 0;
+      this.readings = [];
+      this.stats = { updates: 0, skippedTurning: 0, recoveries: 0 };  // sim-only instrumentation
+    }
+    imuRadians() {
+      const deg = this.imu.get_rotation();
+      if (Number.isFinite(deg)) this.lastImuRad = -deg * kPi / 180.0;
+      return this.lastImuRad;
+    }
+    setPose(p) {
+      this.headingOffset = p.theta - this.imuRadians();
+      this.lastTheta = p.theta;
+      this.lastVert = this.vert();
+      this.lastHorz = this.horz ? this.horz() : 0.0;
+      this.odomPose = { ...p };
+      this.mcl.init(p.x, p.y, this.cfg.initSpread);
+    }
+    getPose() { return this.mcl.estimate(this.lastTheta); }
+    getOdomPose() { return { ...this.odomPose }; }
+    setSensorCorrection(on) { this.sensorCorrection = on; }
+    loopOnce() {   // one iteration of Localizer::loop()
+      const doSensors = (++this.tick % this.cfg.sensorEveryN) === 0;
+      this.step(doSensors);
+    }
+    step(doSensors) {
+      const v = this.vert();
+      const h = this.horz ? this.horz() : 0.0;
+      const theta = this.headingOffset + this.imuRadians();
+      const d = loc.odomStep(this.cfg.odom, v - this.lastVert, h - this.lastHorz, this.lastTheta, theta);
+      const turnRate = Math.abs(theta - this.lastTheta) / (this.cfg.loopMs / 1000.0);
+      this.lastVert = v; this.lastHorz = h; this.lastTheta = theta;
+      this.odomPose.x += d.dx; this.odomPose.y += d.dy; this.odomPose.theta = theta;
+      this.mcl.predict(d.dx, d.dy);
+      if (!doSensors || !this.sensorCorrection || this.sensors.length === 0) return;
+      if (turnRate > this.cfg.maxTurnRateForUpdate) { this.stats.skippedTurning++; return; }
+      this.readings = this.sensors.map(b => {
+        const mm = b.sensor.get();
+        return { valid: mm > 20 && mm < 2000, dist: mm / 25.4 };
+      });
+      this.mcl.update(this.readings, theta);
+      this.stats.updates++;
+      if (this.mcl.lastRecover) this.stats.recoveries++;
+    }
+  }
+
+  // ---------- The simulated world ----------
+  const defaultWorldCfg = () => ({
+    robotHalf: 8,            // in, robot is 16" square
+    wheelDiameter: 2.0,      // what the robot CODE thinks the tracking wheels are
+    wheelScaleError: 0.03,   // real wheels roll 3% further than the code thinks
+    wheelNoise: 0.002,       // in of random error per 10 ms tick per wheel
+    imuDriftDegPerMin: 0,    // gyro drift
+    sensorNoiseFrac: 0.01, sensorNoiseMin: 0.2,  // real distance-sensor noise (in)
+    garbageProb: 0.05,       // chance a reading is random junk
+    objectRadius: 3.5,       // in, game objects that block sensors
+    vertLeftOffset: 0.0, horzFwdOffset: -2.0,
+    sensorMounts: [
+      { name: "Left", fwd: 0.0, left: 6.5, angle: kPi / 2 },
+      { name: "Right", fwd: 0.0, left: -6.5, angle: -kPi / 2 },
+      { name: "Back", fwd: -7.0, left: 0.0, angle: kPi },
+    ],
+  });
+
+  class World {
+    constructor(wcfg, mclOverrides = {}, seed = 1) {
+      this.w = { ...defaultWorldCfg(), ...wcfg };
+      this.rng = new loc.MT19937(seed);
+      this.n01 = new loc.Normal(0, 1);
+      this.objects = [];
+      this.time = 0;
+      this.truth = { x: -36, y: -36, theta: kPi / 2 };
+      this.headingTrue0 = this.truth.theta;
+      this.imuDriftRad = 0;
+      this.imu = new FakeImu();
+      this.vertRot = new FakeRotation(); this.horzRot = new FakeRotation();
+      this.sensorsEnabled = this.w.sensorMounts.map(() => true);
+      this.dist = this.w.sensorMounts.map(() => new FakeDistance());
+      this.rays = this.w.sensorMounts.map(() => null);   // for drawing
+      const mcl = { ...loc.defaultMCLConfig(), ...mclOverrides };
+      this.locCfg = { odom: { vertLeftOffset: this.w.vertLeftOffset, horzFwdOffset: this.w.horzFwdOffset },
+                      mcl, loopMs: 10, sensorEveryN: 3, maxTurnRateForUpdate: 3.0, initSpread: 1.5, seed: seed + 100 };
+      this.buildLocalizer();
+    }
+    buildLocalizer() {
+      const bindings = this.w.sensorMounts
+        .map((m, i) => ({ sensor: this.dist[i], mount: { fwd: m.fwd, left: m.left, angle: m.angle }, i }))
+        .filter(b => this.sensorsEnabled[b.i]);
+      this.sensorMap = bindings.map(b => b.i);
+      this.localizer = new Localizer(this.locCfg,
+        this.imu, trackingWheel(this.vertRot, this.w.wheelDiameter),
+        trackingWheel(this.horzRot, this.w.wheelDiameter), bindings);
+      this.localizer.setPose({ ...this.truth });   // like autonomous(): start pose is known
+    }
+    gauss() { return this.n01.sample(this.rng); }
+    uni() { return loc.canonical(this.rng); }
+
+    // Distance from a point along a ray to the first wall OR game object.
+    trueRay(ox, oy, a) {
+      const c = Math.cos(a), s = Math.sin(a), W = this.locCfg.mcl.fieldHalf;
+      let t = 1e9;
+      if (c > 1e-9) t = Math.min(t, (W - ox) / c); else if (c < -1e-9) t = Math.min(t, (-W - ox) / c);
+      if (s > 1e-9) t = Math.min(t, (W - oy) / s); else if (s < -1e-9) t = Math.min(t, (-W - oy) / s);
+      for (const o of this.objects) {        // ray-circle intersection
+        const fx = ox - o.x, fy = oy - o.y;
+        const b = fx * c + fy * s, cc = fx * fx + fy * fy - this.w.objectRadius ** 2;
+        const disc = b * b - cc;
+        if (disc < 0) continue;
+        const hit = -b - Math.sqrt(disc);
+        if (hit > 0 && hit < t) t = hit;
+      }
+      return Math.max(0, t);
+    }
+
+    // Advance the world by 10 ms with drive command v (in/s, forward) and w (rad/s, CCW).
+    tick(v, w) {
+      const dt = 0.01, T = this.truth, W = this.w;
+      const dTheta = w * dt;
+      let ds = v * dt;
+      // Exact arc motion of the robot center.
+      const m = T.theta + dTheta / 2;
+      const chord = Math.abs(dTheta) < 1e-9 ? ds : 2 * Math.sin(dTheta / 2) * (ds / dTheta);
+      let nx = T.x + chord * Math.cos(m), ny = T.y + chord * Math.sin(m);
+      const lim = this.locCfg.mcl.fieldHalf - W.robotHalf;
+      if (Math.abs(nx) > lim || Math.abs(ny) > lim) { nx = T.x; ny = T.y; ds = 0; }  // against the wall: no translation
+      T.x = nx; T.y = ny; T.theta += dTheta;
+
+      // Tracking wheels: true travel of each wheel's contact point, then real-world error.
+      const vertTravel = ds - W.vertLeftOffset * dTheta;
+      const horzTravel = W.horzFwdOffset * dTheta;
+      const toCentideg = (inches) => inches / (kPi * W.wheelDiameter) * 36000;
+      this.vertRot.centideg += toCentideg(vertTravel * (1 + W.wheelScaleError) + W.wheelNoise * this.gauss());
+      this.horzRot.centideg += toCentideg(horzTravel * (1 + W.wheelScaleError) + W.wheelNoise * this.gauss());
+
+      // IMU: reports rotation since start, clockwise degrees, plus drift.
+      this.imuDriftRad += (W.imuDriftDegPerMin * kPi / 180 / 60) * dt;
+      this.imu.cwDeg = -((T.theta - this.headingTrue0) + this.imuDriftRad) * 180 / kPi;
+
+      // Distance sensors (computed from the TRUE pose, walls + game objects).
+      const ct = Math.cos(T.theta), st = Math.sin(T.theta);
+      W.sensorMounts.forEach((s, i) => {
+        const sx = T.x + s.fwd * ct - s.left * st, sy = T.y + s.fwd * st + s.left * ct, a = T.theta + s.angle;
+        const d = this.trueRay(sx, sy, a);
+        let meas = d + this.gauss() * (W.sensorNoiseMin + W.sensorNoiseFrac * d);
+        let garbage = false;
+        if (this.uni() < W.garbageProb) { meas = this.uni() * d; garbage = true; }
+        const mm = Math.round(meas * 25.4);
+        this.dist[i].mm = (mm < 20 || mm > 2000) ? 9999 : mm;
+        this.rays[i] = { sx, sy, a, d, meas, inRange: this.dist[i].mm !== 9999, garbage };
+      });
+
+      this.localizer.loopOnce();
+      this.time += dt;
+    }
+
+    // Moves the robot WITHOUT the wheels or IMU noticing (wheel slip / bounce in a collision).
+    slip(dx, dy) {
+      const lim = this.locCfg.mcl.fieldHalf - this.w.robotHalf;
+      this.truth.x = clampV(this.truth.x + dx, -lim, lim);
+      this.truth.y = clampV(this.truth.y + dy, -lim, lim);
+    }
+    errors() {
+      const e = this.localizer.getPose(), o = this.localizer.getOdomPose(), T = this.truth;
+      return { mcl: Math.hypot(e.x - T.x, e.y - T.y), odom: Math.hypot(o.x - T.x, o.y - T.y),
+               heading: Math.abs(wrap(e.theta - T.theta)) * 180 / kPi };
+    }
+  }
+
+  // ---------- Autopilot: drives waypoints using a pose the ROBOT believes ----------
+  function autopilot(pose, target) {
+    const dx = target.x - pose.x, dy = target.y - pose.y, dist = Math.hypot(dx, dy);
+    const err = wrap(Math.atan2(dy, dx) - pose.theta);
+    const w = clampV(5 * err, -4, 4);
+    const v = Math.abs(err) > 0.8 ? 0 : clampV(dist * 3, 0, 40) * Math.cos(err);
+    return { v, w, dist };
+  }
+
+  return { FakeImu, FakeRotation, FakeDistance, trackingWheel, Localizer, World, defaultWorldCfg, autopilot, wrap };
+})(typeof loc !== "undefined" ? loc : require("./mcl_port.js"));
+if (typeof module !== "undefined") module.exports = simCore;
+</script>
+<script>
+"use strict";
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const field = $("field"), graph = $("graph");
+  const fctx = field.getContext("2d"), gctx = graph.getContext("2d");
+  const square = [{ x: 36, y: -36 }, { x: 36, y: 36 }, { x: -36, y: 36 }, { x: -36, y: -36 }];
+
+  // ---------- State ----------
+  const settings = { junk: 5, scale: 3, drift: 0, nparts: 250, sigma: 5, sensors: [true, true, true] };
+  let world, seed = 1, wp = 0, auto = false, steer = "filter", playing = true, speed = 1, acc = 0, lastT = null;
+  let trails = { truth: [], est: [], odom: [] }, hist = [], lastRec = 0, recoveryTimes = [], statusMsg = "", statusUntil = 0;
+  const keys = { w: false, s: false, a: false, d: false };
+
+  function makeWorld(keep) {
+    const old = world;
+    world = new simCore.World(
+      { garbageProb: settings.junk / 100, wheelScaleError: settings.scale / 100, imuDriftDegPerMin: settings.drift },
+      { numParticles: settings.nparts, sensorSigmaFrac: settings.sigma / 100 }, seed);
+    world.sensorsEnabled = settings.sensors.slice();
+    if (keep && old) {
+      world.truth = { ...old.truth };
+      world.objects = old.objects.slice();
+      world.time = old.time;
+    }
+    world.headingTrue0 = world.truth.theta;
+    world.buildLocalizer();
+    world.localizer.setSensorCorrection($("correction").checked);
+    lastRec = 0;
+  }
+  function resetAll() {
+    seed++; makeWorld(false); wp = 0;
+    trails = { truth: [], est: [], odom: [] }; hist = []; recoveryTimes = [];
+    flash("Reset. The robot starts at a known position, like the start of autonomous.");
+  }
+  function flash(msg) { statusMsg = msg; statusUntil = performance.now() + 4000; }
+
+  // ---------- Simulation step (10 ms) ----------
+  function simTick() {
+    let v, w;
+    if (auto) {
+      const L = world.localizer;
+      const pose = steer === "filter" ? L.getPose() : L.getOdomPose();
+      const cmd = simCore.autopilot(pose, square[wp]);
+      if (cmd.dist < 3) wp = (wp + 1) % square.length;
+      v = cmd.v; w = cmd.w;
+    } else {
+      v = 40 * ((keys.w ? 1 : 0) - (keys.s ? 1 : 0));
+      w = 3 * ((keys.a ? 1 : 0) - (keys.d ? 1 : 0));
+    }
+    world.tick(v, w);
+    const rec = world.localizer.stats.recoveries;
+    if (rec !== lastRec) { recoveryTimes.push(world.time); lastRec = rec; flash("Recovery: sensors kept disagreeing, so fresh particles were scattered around the estimate."); }
+    const n = Math.round(world.time * 100);
+    if (n % 5 === 0) {
+      const e = world.localizer.getPose(), o = world.localizer.getOdomPose(), T = world.truth;
+      const push = (arr, p) => { arr.push([p.x, p.y]); if (arr.length > 600) arr.shift(); };
+      push(trails.truth, T); push(trails.est, e); push(trails.odom, o);
+      const err = world.errors();
+      hist.push({ t: world.time, mcl: err.mcl, odom: err.odom });
+      while (hist.length && hist[0].t < world.time - 20) hist.shift();
+    }
+  }
+
+  // ---------- Drawing ----------
+  let C = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    for (const k of ["page", "ink", "muted", "rule", "tile", "tile-line", "perimeter", "truth", "odom", "est", "particle", "ray", "object", "object-edge"])
+      C[k] = cs.getPropertyValue("--" + k).trim();
+  }
+  function fit(canvas, ctx) {
+    const r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const W = Math.max(1, Math.round(r.width * dpr)), H = Math.max(1, Math.round(r.height * dpr));
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+    return { W, H, dpr };
+  }
+  const FIELD_VIEW = 77;  // inches from center to canvas edge (leaves room for the label)
+  function toPx(W) { const s = W / (2 * FIELD_VIEW); return { s, X: (x) => W / 2 + x * s, Y: (y) => W / 2 - y * s }; }
+
+  function drawRobot(ctx, P, pose, half, style) {
+    const { X, Y, s } = P;
+    ctx.save();
+    ctx.translate(X(pose.x), Y(pose.y));
+    ctx.rotate(-pose.theta);
+    const h = half * s;
+    if (style.fill) { ctx.fillStyle = style.fill; ctx.globalAlpha = style.alpha ?? 1; ctx.fillRect(-h, -h, 2 * h, 2 * h); ctx.globalAlpha = 1; }
+    ctx.strokeStyle = style.stroke; ctx.lineWidth = style.width; ctx.setLineDash(style.dash || []);
+    ctx.strokeRect(-h, -h, 2 * h, 2 * h);
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(h * 1.35, 0); ctx.stroke();   // heading
+    ctx.restore();
+  }
+  function drawTrail(ctx, P, pts, color, dash, alpha) {
+    if (pts.length < 2) return;
+    ctx.save(); ctx.strokeStyle = color; ctx.globalAlpha = alpha; ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
+    ctx.setLineDash(dash); ctx.beginPath();
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(P.X(x), P.Y(y)) : ctx.moveTo(P.X(x), P.Y(y))));
+    ctx.stroke(); ctx.restore();
+  }
+
+  function drawField() {
+    const { W, dpr } = fit(field, fctx);
+    const ctx = fctx, P = toPx(W), F = world.locCfg.mcl.fieldHalf;
+    ctx.fillStyle = C.page; ctx.fillRect(0, 0, W, W);
+    ctx.fillStyle = C.tile; ctx.fillRect(P.X(-F), P.Y(F), 2 * F * P.s, 2 * F * P.s);
+    ctx.strokeStyle = C["tile-line"]; ctx.lineWidth = 1 * dpr; ctx.beginPath();
+    for (let g = -48; g <= 48; g += 24) { ctx.moveTo(P.X(g), P.Y(F)); ctx.lineTo(P.X(g), P.Y(-F)); ctx.moveTo(P.X(-F), P.Y(g)); ctx.lineTo(P.X(F), P.Y(g)); }
+    ctx.stroke();
+    ctx.strokeStyle = C.perimeter; ctx.lineWidth = 4 * dpr; ctx.strokeRect(P.X(-F), P.Y(F), 2 * F * P.s, 2 * F * P.s);
+    ctx.fillStyle = C.muted; ctx.font = `${12 * dpr}px "IBM Plex Sans", system-ui, sans-serif`; ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Driver station", W / 2, P.Y(-F) + (W - P.Y(-F)) / 2 + 1 * dpr);
+
+    // game objects
+    for (const o of world.objects) {
+      ctx.beginPath(); ctx.arc(P.X(o.x), P.Y(o.y), world.w.objectRadius * P.s, 0, 2 * Math.PI);
+      ctx.fillStyle = C.object; ctx.fill(); ctx.strokeStyle = C["object-edge"]; ctx.lineWidth = 1.5 * dpr; ctx.stroke();
+    }
+    drawTrail(ctx, P, trails.odom, C.odom, [5 * dpr, 4 * dpr], 0.55);
+    drawTrail(ctx, P, trails.truth, C.truth, [], 0.35);
+    drawTrail(ctx, P, trails.est, C.est, [], 0.55);
+
+    // sensor beams from the TRUE robot
+    if ($("showRays").checked) {
+      world.rays.forEach((r, i) => {
+        if (!r || !world.sensorsEnabled[i]) return;
+        const len = r.inRange ? r.d : Math.min(r.d, world.locCfg.mcl.maxRange);
+        ctx.save(); ctx.strokeStyle = C.ray; ctx.lineWidth = 1.5 * dpr; ctx.globalAlpha = r.inRange ? 0.9 : 0.35;
+        ctx.setLineDash(r.inRange ? [] : [2 * dpr, 4 * dpr]);
+        ctx.beginPath(); ctx.moveTo(P.X(r.sx), P.Y(r.sy));
+        ctx.lineTo(P.X(r.sx + len * Math.cos(r.a)), P.Y(r.sy + len * Math.sin(r.a))); ctx.stroke();
+        if (r.inRange) {   // where the reading says the wall is
+          ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.fillStyle = C.ray;
+          const mx = P.X(r.sx + r.meas * Math.cos(r.a)), my = P.Y(r.sy + r.meas * Math.sin(r.a));
+          ctx.beginPath(); ctx.arc(mx, my, (r.garbage ? 4.5 : 3) * dpr, 0, 2 * Math.PI);
+          if (r.garbage) { ctx.lineWidth = 1.5 * dpr; ctx.stroke(); } else ctx.fill();
+        }
+        ctx.restore();
+      });
+    }
+    const L = world.localizer, half = world.w.robotHalf;
+    drawRobot(ctx, P, world.truth, half, { fill: C.truth, alpha: 0.22, stroke: C.truth, width: 2 * dpr });
+    drawRobot(ctx, P, L.getOdomPose(), half, { stroke: C.odom, width: 2 * dpr, dash: [5 * dpr, 4 * dpr] });
+    drawRobot(ctx, P, L.getPose(), half, { stroke: C.est, width: 2.5 * dpr });
+    // particles
+    if ($("showParticles").checked) {
+      ctx.fillStyle = C.particle; ctx.strokeStyle = C.particle; ctx.lineWidth = 1 * dpr;
+      const r = 1.8 * dpr;
+      ctx.globalAlpha = 0.6;
+      for (const p of world.localizer.mcl.particles) {
+        ctx.beginPath(); ctx.arc(P.X(p.x), P.Y(p.y), p.scored ? r : r * 1.6, 0, 2 * Math.PI);
+        p.scored ? ctx.fill() : ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawGraph() {
+    const { W, H, dpr } = fit(graph, gctx), ctx = gctx;
+    ctx.clearRect(0, 0, W, H);
+    const now = world.time, t0 = now - 20;
+    const maxE = Math.max(5, ...hist.map(h => Math.max(h.mcl, h.odom)));
+    const top = Math.ceil(maxE / 5) * 5;
+    const X = (t) => (t - t0) / 20 * W, Y = (e) => H - 4 * dpr - (e / top) * (H - 10 * dpr);
+    ctx.strokeStyle = C.rule; ctx.lineWidth = 1 * dpr; ctx.beginPath();
+    for (let e = 0; e <= top; e += top / 5) { ctx.moveTo(0, Y(e)); ctx.lineTo(W, Y(e)); }
+    ctx.stroke();
+    ctx.strokeStyle = C.muted; ctx.globalAlpha = 0.6;
+    for (const rt of recoveryTimes) if (rt > t0) { ctx.beginPath(); ctx.moveTo(X(rt), 0); ctx.lineTo(X(rt), H); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+    const line = (key, color) => {
+      if (hist.length < 2) return;
+      ctx.strokeStyle = color; ctx.lineWidth = 2 * dpr; ctx.beginPath();
+      hist.forEach((h, i) => (i ? ctx.lineTo(X(h.t), Y(h[key])) : ctx.moveTo(X(h.t), Y(h[key]))));
+      ctx.stroke();
+    };
+    line("odom", C.odom); line("mcl", C.est);
+    $("graphScale").textContent = `Gridlines every ${top / 5} in. Vertical marks are recoveries.`;
+  }
+
+  function updateReadouts() {
+    const e = world.errors(), M = world.localizer.mcl;
+    $("errMcl").textContent = e.mcl.toFixed(1);
+    $("errOdom").textContent = e.odom.toFixed(1);
+    $("neff").textContent = M.nEff ? Math.round(M.nEff) : M.particles.length;
+    const s = $("status");
+    if (performance.now() < statusUntil) s.textContent = statusMsg;
+    else if (!$("correction").checked) s.textContent = "Distance sensors are off, so the filter is running on odometry alone.";
+    else s.textContent = `Recoveries so far: ${world.localizer.stats.recoveries}`;
+  }
+
+  // ---------- Main loop ----------
+  function frame(t) {
+    if (lastT === null) lastT = t;
+    const dt = Math.min(0.1, (t - lastT) / 1000); lastT = t;
+    if (playing) {
+      acc += dt * speed;
+      let n = 0;
+      while (acc >= 0.01 && n < 200) { simTick(); acc -= 0.01; n++; }
+    }
+    readColors(); drawField(); drawGraph(); updateReadouts();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Controls ----------
+  const keyMap = { w: "w", arrowup: "w", s: "s", arrowdown: "s", a: "a", arrowleft: "a", d: "d", arrowright: "d" };
+  function onKey(e, down) {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    const k = keyMap[e.key.toLowerCase()];
+    if (!k) return;
+    e.preventDefault();
+    keys[k] = down;
+    if (down && auto) setAuto(false);
+  }
+  window.addEventListener("keydown", (e) => onKey(e, true));
+  window.addEventListener("keyup", (e) => onKey(e, false));
+  window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
+  document.querySelectorAll(".pad button").forEach((b) => {
+    const k = b.dataset.key;
+    const on = (e) => { e.preventDefault(); keys[k] = true; if (auto) setAuto(false); b.setPointerCapture?.(e.pointerId); };
+    const off = () => { keys[k] = false; };
+    b.addEventListener("pointerdown", on); b.addEventListener("pointerup", off);
+    b.addEventListener("pointercancel", off); b.addEventListener("pointerleave", off);
+  });
+
+  function setAuto(on) {
+    auto = on; $("auto").setAttribute("aria-pressed", String(on));
+    $("auto").textContent = on ? "Stop driving by itself" : "Drive a square by itself";
+    if (on) {   // start from the corner nearest to the robot's believed position
+      const p = world.localizer.getPose();
+      let best = 0; square.forEach((q, i) => { if (Math.hypot(q.x - p.x, q.y - p.y) < Math.hypot(square[best].x - p.x, square[best].y - p.y)) best = i; });
+      wp = best;
+    }
+  }
+  $("auto").onclick = () => setAuto(!auto);
+  $("steer").onchange = (e) => { steer = e.target.value;
+    flash(steer === "odom" ? "Now the robot drives by odometry alone. Watch the true robot drift off the square." : "Now the robot drives by the filter's estimate."); };
+
+  $("slip").onclick = () => {
+    const a = Math.random() * 2 * Math.PI;
+    world.slip(8 * Math.cos(a), 8 * Math.sin(a));
+    flash("Slipped 8 inches. Odometry didn't notice; the filter has to work it out from the walls.");
+  };
+  $("scatter").onclick = () => {
+    world.objects = [];
+    for (let k = 0; k < 6; k++) world.objects.push({ x: (Math.random() * 2 - 1) * 60, y: (Math.random() * 2 - 1) * 60 });
+  };
+  $("clearObj").onclick = () => { world.objects = []; };
+  field.addEventListener("click", (e) => {
+    const r = field.getBoundingClientRect(), s = r.width / (2 * FIELD_VIEW);
+    const x = (e.clientX - r.left - r.width / 2) / s, y = -(e.clientY - r.top - r.height / 2) / s;
+    const F = world.locCfg.mcl.fieldHalf;
+    if (Math.abs(x) > F || Math.abs(y) > F) return;
+    const i = world.objects.findIndex(o => Math.hypot(o.x - x, o.y - y) < world.w.objectRadius + 1.5);
+    if (i >= 0) world.objects.splice(i, 1); else world.objects.push({ x, y });
+  });
+
+  function slider(id, fmt, apply) {
+    const el = $(id), out = $(id + "Out");
+    const show = () => { out.textContent = fmt(+el.value); };
+    el.addEventListener("input", () => { show(); apply(+el.value); });
+    show();
+  }
+  slider("junk", v => `${v}%`, v => { settings.junk = v; world.w.garbageProb = v / 100; });
+  slider("scale", v => `${v}%`, v => { settings.scale = v; world.w.wheelScaleError = v / 100; });
+  slider("drift", v => `${v}° per minute`, v => { settings.drift = v; world.w.imuDriftDegPerMin = v; });
+  slider("sigma", v => `${v}% of distance`, v => { settings.sigma = v; world.localizer.mcl.cfg.sensorSigmaFrac = v / 100; });
+  slider("nparts", v => `${v}`, v => { settings.nparts = v; makeWorld(true); });
+
+  const toggles = $("sensorToggles");
+  simCore.defaultWorldCfg().sensorMounts.forEach((m, i) => {
+    const lab = document.createElement("label"); lab.className = "check";
+    lab.innerHTML = `<input type="checkbox" checked> ${m.name} sensor`;
+    lab.querySelector("input").addEventListener("change", (e) => {
+      settings.sensors[i] = e.target.checked; makeWorld(true);
+      flash(`${m.name} sensor ${e.target.checked ? "added" : "removed"}. The filter restarted at the true position.`);
+    });
+    toggles.appendChild(lab);
+  });
+  $("correction").onchange = (e) => world.localizer.setSensorCorrection(e.target.checked);
+  $("setPose").onclick = () => { world.localizer.setPose({ ...world.truth }); flash("Pose set to the true position, like pressing A on the controller."); };
+
+  $("play").onclick = () => {
+    playing = !playing; $("play").textContent = playing ? "Pause" : "Play";
+    $("play").setAttribute("aria-pressed", String(playing)); $("stepBtn").disabled = playing;
+  };
+  $("speed").onchange = (e) => { speed = +e.target.value; };
+  $("stepBtn").onclick = () => simTick();
+  $("reset").onclick = () => { setAuto(false); resetAll(); };
+
+  makeWorld(false);
+  setAuto(true);
+  flash("Driving a square by itself. Try a slip, or click the field to drop game objects.");
+  requestAnimationFrame(frame);
+  window.__sim = { get world() { return world; } };   // for automated testing
+})();
+</script>
+</body>
+</html>

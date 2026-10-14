@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VEX U particle filter simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page: #eef1f4; --ink: #1c2430; --muted: #5b6675; --rule: #d3d8de; --control: #ffffff; --control-ink: #1c2430;
+  --accent: #1f3a5f; --accent-ink: #ffffff;
+  --tile: #d5d9dd; --tile-line: #bfc5cb; --perimeter: #7d8790;
+  --truth: #1f3a5f; --odom: #b7791f; --est: #0f7f81; --particle: #6d4ac4; --ray: #cf4f39; --object: #8a94a0; --object-edge: #5f6873;
+  color-scheme: light;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #14181d; --ink: #e6eaf0; --muted: #98a2ae; --rule: #2c333b; --control: #1d232a; --control-ink: #e6eaf0;
+    --accent: #8db4e8; --accent-ink: #0f1620;
+    --tile: #252b32; --tile-line: #313942; --perimeter: #5c6670;
+    --truth: #8db4e8; --odom: #e0a84a; --est: #3cc4c2; --particle: #a98bf0; --ray: #f07a62; --object: #6f7a86; --object-edge: #9aa5b1;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #14181d; --ink: #e6eaf0; --muted: #98a2ae; --rule: #2c333b; --control: #1d232a; --control-ink: #e6eaf0;
+  --accent: #8db4e8; --accent-ink: #0f1620;
+  --tile: #252b32; --tile-line: #313942; --perimeter: #5c6670;
+  --truth: #8db4e8; --odom: #e0a84a; --est: #3cc4c2; --particle: #a98bf0; --ray: #f07a62; --object: #6f7a86; --object-edge: #9aa5b1;
+  color-scheme: dark;
+}
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px; line-height: 1.45;
+}
+.app { display: grid; grid-template-columns: minmax(0, calc(100vh - 150px)) 360px; grid-template-areas: "stage head" "stage panel";
+  grid-template-rows: auto 1fr; gap: 0 32px; padding: 24px; justify-content: center; align-items: start; }
+.head { grid-area: head; display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px; }
+.stage { grid-area: stage; }
+.panel { grid-area: panel; }
+.stage { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+#field { width: 100%; aspect-ratio: 1 / 1; display: block; cursor: crosshair; touch-action: manipulation; border-radius: 6px; }
+#graph { width: 91.2%; margin: 0 4.4%; height: 96px; display: block; }
+.graph-caption { font-size: 13px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap; margin: 0 4.4%; }
+.panel { display: flex; flex-direction: column; gap: 22px; }
+h1 { font-size: 22px; font-weight: 600; line-height: 1.2; margin: 0 0 4px; letter-spacing: -0.01em; }
+.lede { margin: 0; color: var(--muted); font-size: 14px; }
+.readouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 14px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.readout b { display: block; font-size: 26px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.readout b small { font-size: 14px; font-weight: 400; margin-left: 3px; }
+.readout > span { font-size: 12.5px; color: var(--muted); }
+.readout.est b { color: var(--est); } .readout.odom b { color: var(--odom); }
+.status { font-size: 13px; color: var(--muted); min-height: 2.8em; margin: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+section h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+section p.hint { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select {
+  font: inherit; font-size: 14px; color: var(--control-ink); background: var(--control);
+  border: 1px solid var(--rule); border-radius: 5px; padding: 6px 12px; cursor: pointer;
+}
+button:hover, select:hover { border-color: var(--muted); }
+button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:focus-visible, select:focus-visible, input:focus-visible, #field:focus-visible { outline: 2px solid var(--est); outline-offset: 2px; }
+label.check { display: flex; gap: 8px; align-items: center; font-size: 14px; cursor: pointer; }
+.slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 14px; margin-top: 8px; }
+.slider output { font-variant-numeric: tabular-nums; color: var(--muted); }
+.slider input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.pad { display: none; grid-template-columns: repeat(3, 52px); gap: 6px; margin-top: 10px; user-select: none; -webkit-user-select: none; }
+.pad button { height: 46px; padding: 0; font-size: 18px; touch-action: none; }
+.pad .sp { visibility: hidden; }
+kbd { font-family: inherit; font-size: 12.5px; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--control); }
+@media (hover: none), (max-width: 860px) { .pad { display: grid; } }
+@media (max-width: 860px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "stage" "panel"; padding: 14px; gap: 0; }
+  .head { margin-bottom: 14px; gap: 10px; }
+  .stage { margin-bottom: 22px; }
+  h1 { font-size: 19px; }
+  .lede { display: none; }
+  .readouts { padding: 10px 0; }
+  .readout b { font-size: 22px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage">
+    <canvas id="field" tabindex="0" aria-label="Simulated VEX field. Click to add or remove a game object."></canvas>
+    <canvas id="graph" aria-label="Position error over the last 20 seconds"></canvas>
+    <div class="graph-caption"><span>Position error, last 20 seconds</span><span id="graphScale"></span></div>
+  </div>
+
+  <div class="head">
+    <header>
+      <h1>Particle filter simulator</h1>
+      <p class="lede">Your <code>mcl.hpp</code> and <code>odometry.hpp</code>, ported to JavaScript and checked against the C++, driving a virtual robot on a VEX field.</p>
+    </header>
+
+    <div class="readouts" aria-live="polite">
+      <div class="readout est"><b><span id="errMcl">0.0</span><small>in</small></b><span>Filter error</span></div>
+      <div class="readout odom"><b><span id="errOdom">0.0</span><small>in</small></b><span>Odometry error</span></div>
+      <div class="readout"><b id="neff">250</b><span>Particles in use</span></div>
+    </div>
+    <div class="status" id="status"></div>
+
+    <div class="legend">
+      <span><i style="background:var(--truth)"></i>True robot</span>
+      <span><i style="background:var(--est)"></i>Filter estimate</span>
+      <span><i style="background:var(--odom)"></i>Odometry only</span>
+      <span><i style="background:var(--particle);height:6px;width:6px;border-radius:50%"></i>Particles</span>
+      <span><i style="background:var(--ray)"></i>Sensor beams</span>
+    </div>
+  </div>
+
+  <div class="panel">
+
+    <section>
+      <h2>Drive</h2>
+      <p class="hint"><kbd>W</kbd> <kbd>S</kbd> drive, <kbd>A</kbd> <kbd>D</kbd> turn. Arrow keys work too.</p>
+      <div class="row">
+        <button id="auto" aria-pressed="false">Drive a square by itself</button>
+        <select id="steer" aria-label="What the autopilot steers by">
+          <option value="filter">Steer by filter estimate</option>
+          <option value="odom">Steer by odometry only</option>
+        </select>
+      </div>
+      <div class="pad" aria-label="Drive pad">
+        <span class="sp"></span><button data-key="w" aria-label="Forward">▲</button><span class="sp"></span>
+        <button data-key="a" aria-label="Turn left">◀</button><button data-key="s" aria-label="Backward">▼</button><button data-key="d" aria-label="Turn right">▶</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Disturb it</h2>
+      <p class="hint">Click the field to add or remove a game object. Objects block sensor beams, and the filter doesn't know where they are.</p>
+      <div class="row">
+        <button id="slip">Slip 8 inches</button>
+        <button id="scatter">Scatter objects</button>
+        <button id="clearObj">Clear objects</button>
+      </div>
+      <p class="hint" style="margin-top:8px">A slip moves the robot without the wheels noticing, like a bounce in a collision.</p>
+      <div class="slider"><label for="junk">Junk sensor readings</label><output id="junkOut"></output><input id="junk" type="range" min="0" max="30" step="1" value="5"></div>
+    </section>
+
+    <section>
+      <h2>Robot hardware</h2>
+      <div class="slider"><label for="scale">Tracking wheel size error</label><output id="scaleOut"></output><input id="scale" type="range" min="0" max="8" step="0.5" value="3"></div>
+      <div class="slider"><label for="drift">IMU drift</label><output id="driftOut"></output><input id="drift" type="range" min="0" max="10" step="0.5" value="0"></div>
+      <div class="row" style="margin-top:12px" id="sensorToggles"></div>
+    </section>
+
+    <section>
+      <h2>Filter</h2>
+      <div class="row" style="flex-direction:column;align-items:flex-start;gap:6px">
+        <label class="check"><input type="checkbox" id="correction" checked> Use distance sensors (off is like holding B)</label>
+        <label class="check"><input type="checkbox" id="showParticles" checked> Show particles</label>
+        <label class="check"><input type="checkbox" id="showRays" checked> Show sensor beams</label>
+      </div>
+      <div class="slider"><label for="nparts">Particles</label><output id="npartsOut"></output><input id="nparts" type="range" min="50" max="1000" step="50" value="250"></div>
+      <div class="slider"><label for="sigma">Sensor noise the filter assumes</label><output id="sigmaOut"></output><input id="sigma" type="range" min="1" max="15" step="1" value="5"></div>
+      <div class="row" style="margin-top:12px"><button id="setPose">Tell it the true position (button A)</button></div>
+    </section>
+
+    <section>
+      <h2>Time</h2>
+      <div class="row">
+        <button id="play" aria-pressed="true">Pause</button>
+        <select id="speed" aria-label="Simulation speed">
+          <option value="0.25">¼ speed</option><option value="1" selected>Real time</option><option value="4">4× speed</option>
+        </select>
+        <button id="stepBtn" disabled>Step 10 ms</button>
+        <button id="reset">Reset</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>/*__MCL_PORT__*/</script>
+<script>/*__SIM_CORE__*/</script>
+<script>
+"use strict";
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const field = $("field"), graph = $("graph");
+  const fctx = field.getContext("2d"), gctx = graph.getContext("2d");
+  const square = [{ x: 36, y: -36 }, { x: 36, y: 36 }, { x: -36, y: 36 }, { x: -36, y: -36 }];
+
+  // ---------- State ----------
+  const settings = { junk: 5, scale: 3, drift: 0, nparts: 250, sigma: 5, sensors: [true, true, true] };
+  let world, seed = 1, wp = 0, auto = false, steer = "filter", playing = true, speed = 1, acc = 0, lastT = null;
+  let trails = { truth: [], est: [], odom: [] }, hist = [], lastRec = 0, recoveryTimes = [], statusMsg = "", statusUntil = 0;
+  const keys = { w: false, s: false, a: false, d: false };
+
+  function makeWorld(keep) {
+    const old = world;
+    world = new simCore.World(
+      { garbageProb: settings.junk / 100, wheelScaleError: settings.scale / 100, imuDriftDegPerMin: settings.drift },
+      { numParticles: settings.nparts, sensorSigmaFrac: settings.sigma / 100 }, seed);
+    world.sensorsEnabled = settings.sensors.slice();
+    if (keep && old) {
+      world.truth = { ...old.truth };
+      world.objects = old.objects.slice();
+      world.time = old.time;
+    }
+    world.headingTrue0 = world.truth.theta;
+    world.buildLocalizer();
+    world.localizer.setSensorCorrection($("correction").checked);
+    lastRec = 0;
+  }
+  function resetAll() {
+    seed++; makeWorld(false); wp = 0;
+    trails = { truth: [], est: [], odom: [] }; hist = []; recoveryTimes = [];
+    flash("Reset. The robot starts at a known position, like the start of autonomous.");
+  }
+  function flash(msg) { statusMsg = msg; statusUntil = performance.now() + 4000; }
+
+  // ---------- Simulation step (10 ms) ----------
+  function simTick() {
+    let v, w;
+    if (auto) {
+      const L = world.localizer;
+      const pose = steer === "filter" ? L.getPose() : L.getOdomPose();
+      const cmd = simCore.autopilot(pose, square[wp]);
+      if (cmd.dist < 3) wp = (wp + 1) % square.length;
+      v = cmd.v; w = cmd.w;
+    } else {
+      v = 40 * ((keys.w ? 1 : 0) - (keys.s ? 1 : 0));
+      w = 3 * ((keys.a ? 1 : 0) - (keys.d ? 1 : 0));
+    }
+    world.tick(v, w);
+    const rec = world.localizer.stats.recoveries;
+    if (rec !== lastRec) { recoveryTimes.push(world.time); lastRec = rec; flash("Recovery: sensors kept disagreeing, so fresh particles were scattered around the estimate."); }
+    const n = Math.round(world.time * 100);
+    if (n % 5 === 0) {
+      const e = world.localizer.getPose(), o = world.localizer.getOdomPose(), T = world.truth;
+      const push = (arr, p) => { arr.push([p.x, p.y]); if (arr.length > 600) arr.shift(); };
+      push(trails.truth, T); push(trails.est, e); push(trails.odom, o);
+      const err = world.errors();
+      hist.push({ t: world.time, mcl: err.mcl, odom: err.odom });
+      while (hist.length && hist[0].t < world.time - 20) hist.shift();
+    }
+  }
+
+  // ---------- Drawing ----------
+  let C = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    for (const k of ["page", "ink", "muted", "rule", "tile", "tile-line", "perimeter", "truth", "odom", "est", "particle", "ray", "object", "object-edge"])
+      C[k] = cs.getPropertyValue("--" + k).trim();
+  }
+  function fit(canvas, ctx) {
+    const r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const W = Math.max(1, Math.round(r.width * dpr)), H = Math.max(1, Math.round(r.height * dpr));
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+    return { W, H, dpr };
+  }
+  const FIELD_VIEW = 77;  // inches from center to canvas edge (leaves room for the label)
+  function toPx(W) { const s = W / (2 * FIELD_VIEW); return { s, X: (x) => W / 2 + x * s, Y: (y) => W / 2 - y * s }; }
+
+  function drawRobot(ctx, P, pose, half, style) {
+    const { X, Y, s } = P;
+    ctx.save();
+    ctx.translate(X(pose.x), Y(pose.y));
+    ctx.rotate(-pose.theta);
+    const h = half * s;
+    if (style.fill) { ctx.fillStyle = style.fill; ctx.globalAlpha = style.alpha ?? 1; ctx.fillRect(-h, -h, 2 * h, 2 * h); ctx.globalAlpha = 1; }
+    ctx.strokeStyle = style.stroke; ctx.lineWidth = style.width; ctx.setLineDash(style.dash || []);
+    ctx.strokeRect(-h, -h, 2 * h, 2 * h);
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(h * 1.35, 0); ctx.stroke();   // heading
+    ctx.restore();
+  }
+  function drawTrail(ctx, P, pts, color, dash, alpha) {
+    if (pts.length < 2) return;
+    ctx.save(); ctx.strokeStyle = color; ctx.globalAlpha = alpha; ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
+    ctx.setLineDash(dash); ctx.beginPath();
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(P.X(x), P.Y(y)) : ctx.moveTo(P.X(x), P.Y(y))));
+    ctx.stroke(); ctx.restore();
+  }
+
+  function drawField() {
+    const { W, dpr } = fit(field, fctx);
+    const ctx = fctx, P = toPx(W), F = world.locCfg.mcl.fieldHalf;
+    ctx.fillStyle = C.page; ctx.fillRect(0, 0, W, W);
+    ctx.fillStyle = C.tile; ctx.fillRect(P.X(-F), P.Y(F), 2 * F * P.s, 2 * F * P.s);
+    ctx.strokeStyle = C["tile-line"]; ctx.lineWidth = 1 * dpr; ctx.beginPath();
+    for (let g = -48; g <= 48; g += 24) { ctx.moveTo(P.X(g), P.Y(F)); ctx.lineTo(P.X(g), P.Y(-F)); ctx.moveTo(P.X(-F), P.Y(g)); ctx.lineTo(P.X(F), P.Y(g)); }
+    ctx.stroke();
+    ctx.strokeStyle = C.perimeter; ctx.lineWidth = 4 * dpr; ctx.strokeRect(P.X(-F), P.Y(F), 2 * F * P.s, 2 * F * P.s);
+    ctx.fillStyle = C.muted; ctx.font = `${12 * dpr}px "IBM Plex Sans", system-ui, sans-serif`; ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Driver station", W / 2, P.Y(-F) + (W - P.Y(-F)) / 2 + 1 * dpr);
+
+    // game objects
+    for (const o of world.objects) {
+      ctx.beginPath(); ctx.arc(P.X(o.x), P.Y(o.y), world.w.objectRadius * P.s, 0, 2 * Math.PI);
+      ctx.fillStyle = C.object; ctx.fill(); ctx.strokeStyle = C["object-edge"]; ctx.lineWidth = 1.5 * dpr; ctx.stroke();
+    }
+    drawTrail(ctx, P, trails.odom, C.odom, [5 * dpr, 4 * dpr], 0.55);
+    drawTrail(ctx, P, trails.truth, C.truth, [], 0.35);
+    drawTrail(ctx, P, trails.est, C.est, [], 0.55);
+
+    // sensor beams from the TRUE robot
+    if ($("showRays").checked) {
+      world.rays.forEach((r, i) => {
+        if (!r || !world.sensorsEnabled[i]) return;
+        const len = r.inRange ? r.d : Math.min(r.d, world.locCfg.mcl.maxRange);
+        ctx.save(); ctx.strokeStyle = C.ray; ctx.lineWidth = 1.5 * dpr; ctx.globalAlpha = r.inRange ? 0.9 : 0.35;
+        ctx.setLineDash(r.inRange ? [] : [2 * dpr, 4 * dpr]);
+        ctx.beginPath(); ctx.moveTo(P.X(r.sx), P.Y(r.sy));
+        ctx.lineTo(P.X(r.sx + len * Math.cos(r.a)), P.Y(r.sy + len * Math.sin(r.a))); ctx.stroke();
+        if (r.inRange) {   // where the reading says the wall is
+          ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.fillStyle = C.ray;
+          const mx = P.X(r.sx + r.meas * Math.cos(r.a)), my = P.Y(r.sy + r.meas * Math.sin(r.a));
+          ctx.beginPath(); ctx.arc(mx, my, (r.garbage ? 4.5 : 3) * dpr, 0, 2 * Math.PI);
+          if (r.garbage) { ctx.lineWidth = 1.5 * dpr; ctx.stroke(); } else ctx.fill();
+        }
+        ctx.restore();
+      });
+    }
+    const L = world.localizer, half = world.w.robotHalf;
+    drawRobot(ctx, P, world.truth, half, { fill: C.truth, alpha: 0.22, stroke: C.truth, width: 2 * dpr });
+    drawRobot(ctx, P, L.getOdomPose(), half, { stroke: C.odom, width: 2 * dpr, dash: [5 * dpr, 4 * dpr] });
+    drawRobot(ctx, P, L.getPose(), half, { stroke: C.est, width: 2.5 * dpr });
+    // particles
+    if ($("showParticles").checked) {
+      ctx.fillStyle = C.particle; ctx.strokeStyle = C.particle; ctx.lineWidth = 1 * dpr;
+      const r = 1.8 * dpr;
+      ctx.globalAlpha = 0.6;
+      for (const p of world.localizer.mcl.particles) {
+        ctx.beginPath(); ctx.arc(P.X(p.x), P.Y(p.y), p.scored ? r : r * 1.6, 0, 2 * Math.PI);
+        p.scored ? ctx.fill() : ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawGraph() {
+    const { W, H, dpr } = fit(graph, gctx), ctx = gctx;
+    ctx.clearRect(0, 0, W, H);
+    const now = world.time, t0 = now - 20;
+    const maxE = Math.max(5, ...hist.map(h => Math.max(h.mcl, h.odom)));
+    const top = Math.ceil(maxE / 5) * 5;
+    const X = (t) => (t - t0) / 20 * W, Y = (e) => H - 4 * dpr - (e / top) * (H - 10 * dpr);
+    ctx.strokeStyle = C.rule; ctx.lineWidth = 1 * dpr; ctx.beginPath();
+    for (let e = 0; e <= top; e += top / 5) { ctx.moveTo(0, Y(e)); ctx.lineTo(W, Y(e)); }
+    ctx.stroke();
+    ctx.strokeStyle = C.muted; ctx.globalAlpha = 0.6;
+    for (const rt of recoveryTimes) if (rt > t0) { ctx.beginPath(); ctx.moveTo(X(rt), 0); ctx.lineTo(X(rt), H); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+    const line = (key, color) => {
+      if (hist.length < 2) return;
+      ctx.strokeStyle = color; ctx.lineWidth = 2 * dpr; ctx.beginPath();
+      hist.forEach((h, i) => (i ? ctx.lineTo(X(h.t), Y(h[key])) : ctx.moveTo(X(h.t), Y(h[key]))));
+      ctx.stroke();
+    };
+    line("odom", C.odom); line("mcl", C.est);
+    $("graphScale").textContent = `Gridlines every ${top / 5} in. Vertical marks are recoveries.`;
+  }
+
+  function updateReadouts() {
+    const e = world.errors(), M = world.localizer.mcl;
+    $("errMcl").textContent = e.mcl.toFixed(1);
+    $("errOdom").textContent = e.odom.toFixed(1);
+    $("neff").textContent = M.nEff ? Math.round(M.nEff) : M.particles.length;
+    const s = $("status");
+    if (performance.now() < statusUntil) s.textContent = statusMsg;
+    else if (!$("correction").checked) s.textContent = "Distance sensors are off, so the filter is running on odometry alone.";
+    else s.textContent = `Recoveries so far: ${world.localizer.stats.recoveries}`;
+  }
+
+  // ---------- Main loop ----------
+  function frame(t) {
+    if (lastT === null) lastT = t;
+    const dt = Math.min(0.1, (t - lastT) / 1000); lastT = t;
+    if (playing) {
+      acc += dt * speed;
+      let n = 0;
+      while (acc >= 0.01 && n < 200) { simTick(); acc -= 0.01; n++; }
+    }
+    readColors(); drawField(); drawGraph(); updateReadouts();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Controls ----------
+  const keyMap = { w: "w", arrowup: "w", s: "s", arrowdown: "s", a: "a", arrowleft: "a", d: "d", arrowright: "d" };
+  function onKey(e, down) {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    const k = keyMap[e.key.toLowerCase()];
+    if (!k) return;
+    e.preventDefault();
+    keys[k] = down;
+    if (down && auto) setAuto(false);
+  }
+  window.addEventListener("keydown", (e) => onKey(e, true));
+  window.addEventListener("keyup", (e) => onKey(e, false));
+  window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
+  document.querySelectorAll(".pad button").forEach((b) => {
+    const k = b.dataset.key;
+    const on = (e) => { e.preventDefault(); keys[k] = true; if (auto) setAuto(false); b.setPointerCapture?.(e.pointerId); };
+    const off = () => { keys[k] = false; };
+    b.addEventListener("pointerdown", on); b.addEventListener("pointerup", off);
+    b.addEventListener("pointercancel", off); b.addEventListener("pointerleave", off);
+  });
+
+  function setAuto(on) {
+    auto = on; $("auto").setAttribute("aria-pressed", String(on));
+    $("auto").textContent = on ? "Stop driving by itself" : "Drive a square by itself";
+    if (on) {   // start from the corner nearest to the robot's believed position
+      const p = world.localizer.getPose();
+      let best = 0; square.forEach((q, i) => { if (Math.hypot(q.x - p.x, q.y - p.y) < Math.hypot(square[best].x - p.x, square[best].y - p.y)) best = i; });
+      wp = best;
+    }
+  }
+  $("auto").onclick = () => setAuto(!auto);
+  $("steer").onchange = (e) => { steer = e.target.value;
+    flash(steer === "odom" ? "Now the robot drives by odometry alone. Watch the true robot drift off the square." : "Now the robot drives by the filter's estimate."); };
+
+  $("slip").onclick = () => {
+    const a = Math.random() * 2 * Math.PI;
+    world.slip(8 * Math.cos(a), 8 * Math.sin(a));
+    flash("Slipped 8 inches. Odometry didn't notice; the filter has to work it out from the walls.");
+  };
+  $("scatter").onclick = () => {
+    world.objects = [];
+    for (let k = 0; k < 6; k++) world.objects.push({ x: (Math.random() * 2 - 1) * 60, y: (Math.random() * 2 - 1) * 60 });
+  };
+  $("clearObj").onclick = () => { world.objects = []; };
+  field.addEventListener("click", (e) => {
+    const r = field.getBoundingClientRect(), s = r.width / (2 * FIELD_VIEW);
+    const x = (e.clientX - r.left - r.width / 2) / s, y = -(e.clientY - r.top - r.height / 2) / s;
+    const F = world.locCfg.mcl.fieldHalf;
+    if (Math.abs(x) > F || Math.abs(y) > F) return;
+    const i = world.objects.findIndex(o => Math.hypot(o.x - x, o.y - y) < world.w.objectRadius + 1.5);
+    if (i >= 0) world.objects.splice(i, 1); else world.objects.push({ x, y });
+  });
+
+  function slider(id, fmt, apply) {
+    const el = $(id), out = $(id + "Out");
+    const show = () => { out.textContent = fmt(+el.value); };
+    el.addEventListener("input", () => { show(); apply(+el.value); });
+    show();
+  }
+  slider("junk", v => `${v}%`, v => { settings.junk = v; world.w.garbageProb = v / 100; });
+  slider("scale", v => `${v}%`, v => { settings.scale = v; world.w.wheelScaleError = v / 100; });
+  slider("drift", v => `${v}° per minute`, v => { settings.drift = v; world.w.imuDriftDegPerMin = v; });
+  slider("sigma", v => `${v}% of distance`, v => { settings.sigma = v; world.localizer.mcl.cfg.sensorSigmaFrac = v / 100; });
+  slider("nparts", v => `${v}`, v => { settings.nparts = v; makeWorld(true); });
+
+  const toggles = $("sensorToggles");
+  simCore.defaultWorldCfg().sensorMounts.forEach((m, i) => {
+    const lab = document.createElement("label"); lab.className = "check";
+    lab.innerHTML = `<input type="checkbox" checked> ${m.name} sensor`;
+    lab.querySelector("input").addEventListener("change", (e) => {
+      settings.sensors[i] = e.target.checked; makeWorld(true);
+      flash(`${m.name} sensor ${e.target.checked ? "added" : "removed"}. The filter restarted at the true position.`);
+    });
+    toggles.appendChild(lab);
+  });
+  $("correction").onchange = (e) => world.localizer.setSensorCorrection(e.target.checked);
+  $("setPose").onclick = () => { world.localizer.setPose({ ...world.truth }); flash("Pose set to the true position, like pressing A on the controller."); };
+
+  $("play").onclick = () => {
+    playing = !playing; $("play").textContent = playing ? "Pause" : "Play";
+    $("play").setAttribute("aria-pressed", String(playing)); $("stepBtn").disabled = playing;
+  };
+  $("speed").onchange = (e) => { speed = +e.target.value; };
+  $("stepBtn").onclick = () => simTick();
+  $("reset").onclick = () => { setAuto(false); resetAll(); };
+
+  makeWorld(false);
+  setAuto(true);
+  flash("Driving a square by itself. Try a slip, or click the field to drop game objects.");
+  requestAnimationFrame(frame);
+  window.__sim = { get world() { return world; } };   // for automated testing
+})();
+</script>
+</body>
+</html>
